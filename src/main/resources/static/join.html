@@ -1,0 +1,65 @@
+<html>
+<head>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.10/dist/vue.js"></script>
+    <style type="text/css">
+.tg  {border-collapse:collapse;border-spacing:0;border-color:#9ABAD9;}
+.tg td{font-family:Arial, sans-serif;font-size:14px;padding:10px 18px;border-style:solid;border-width:1px;overflow:hidden;word-break:normal;border-color:#9ABAD9;color:#444;background-color:#EBF5FF;}
+.tg th{font-family:Arial, sans-serif;font-size:14px;font-weight:normal;padding:10px 18px;border-style:solid;border-width:1px;overflow:hidden;word-break:normal;border-color:#9ABAD9;color:#fff;background-color:#409cff;}
+.tg .tg-biwy{font-family:"Comic Sans MS", cursive, sans-serif !important;;border-color:inherit;text-align:center;vertical-align:top}
+.tg .tg-ojmm{font-weight:bold;font-family:"Comic Sans MS", cursive, sans-serif !important;;background-color:#32cb00;color:#000000;border-color:inherit;text-align:center;vertical-align:top}
+.tg .tg-qejj{font-weight:bold;font-family:"Comic Sans MS", cursive, sans-serif !important;;background-color:#cbcefb;color:#000000;border-color:inherit;text-align:center;vertical-align:top}
+.tg .tg-2se1{font-family:"Comic Sans MS", cursive, sans-serif !important;;background-color:#ffc702;border-color:inherit;text-align:center;vertical-align:top}
+
+    </style>
+</head>
+
+<body>
+<div>
+    <div>
+        <h2>Join a game!</h2>
+
+        <table class="tg">
+
+            <tr>
+                <th class="tg-ojmm">Game Name</th>
+                <th class="tg-qejj">Team A</th>
+                <th class="tg-qejj">Team B</th>
+            </tr>
+
+            {% for game in games %}
+            <tr>
+                <td class="tg-2se1">{{ game.name }}</td>
+                <td class="tg-biwy">
+                    <form action="/game/{{ game.id }}/{{ game.teamA.id }}">
+                        <button type="submit">{{game.teamA.name}}</button>
+                    </form>
+
+                </td>
+                <td class="tg-biwy">
+                    <form action="/game/{{ game.id }}/{{ game.teamB.id }}">
+                        <button type="submit">{{game.teamB.name}}</button>
+                    </form>
+                </td>
+            </tr>
+
+            {% endfor %}
+        </table>
+
+    </div>
+
+    <br>
+    <hr>
+    <br>
+
+    <form action="/signout">
+        <button>Signout</button>
+    </form>
+
+
+</div>
+
+
+</body>
+
+</html>

@@ -1,0 +1,46 @@
+<html>
+<head>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.10/dist/vue.js"></script>
+    <style type="text/css">
+.tg  {border-collapse:collapse;border-spacing:0;border-color:#9ABAD9;}
+.tg td{font-family:Arial, sans-serif;font-size:14px;padding:10px 18px;border-style:solid;border-width:1px;overflow:hidden;word-break:normal;border-color:#9ABAD9;color:#444;background-color:#EBF5FF;}
+.tg th{font-family:Arial, sans-serif;font-size:14px;font-weight:normal;padding:10px 18px;border-style:solid;border-width:1px;overflow:hidden;word-break:normal;border-color:#9ABAD9;color:#fff;background-color:#409cff;}
+.tg .tg-biwy{font-family:"Comic Sans MS", cursive, sans-serif !important;;border-color:inherit;text-align:center;vertical-align:top}
+.tg .tg-ojmm{font-weight:bold;font-family:"Comic Sans MS", cursive, sans-serif !important;;background-color:#32cb00;color:#000000;border-color:inherit;text-align:center;vertical-align:top}
+.tg .tg-qejj{font-weight:bold;font-family:"Comic Sans MS", cursive, sans-serif !important;;background-color:#cbcefb;color:#000000;border-color:inherit;text-align:center;vertical-align:top}
+.tg .tg-2se1{font-family:"Comic Sans MS", cursive, sans-serif !important;;background-color:#ffc702;border-color:inherit;text-align:center;vertical-align:top}
+
+    </style>
+</head>
+
+<body>
+<div>
+    <div>
+
+    <h2>Create a game!</h2>
+    <form action="/create" method="post">
+        <p><label>Game Name: </label><input type="text" name="game-name"></p>
+        <p><label>Team A Name: </label><input type="text" name="team-a-name"></p>
+        <p><label>Team B Name: </label><input type="text" name="team-b-name"></p>
+        <p>
+            <button type="submit">Create Game!</button>
+        </p>
+    </form>
+
+
+    <br>
+    <hr>
+    <br>
+
+    <form action="/signout">
+        <button>Signout</button>
+    </form>
+
+
+</div>
+
+
+</body>
+
+</html>

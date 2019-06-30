@@ -1,0 +1,217 @@
+<html>
+<head>
+    <style type="text/css">
+.tg  {border-collapse:collapse;border-spacing:0;border-color:#9ABAD9;}
+.tg td{font-family:Arial, sans-serif;font-size:14px;padding:10px 18px;border-style:solid;border-width:1px;overflow:hidden;word-break:normal;border-color:#9ABAD9;color:#444;background-color:#EBF5FF;}
+.tg th{font-family:Arial, sans-serif;font-size:14px;font-weight:normal;padding:10px 18px;border-style:solid;border-width:1px;overflow:hidden;word-break:normal;border-color:#9ABAD9;color:#fff;background-color:#409cff;}
+.tg .tg-biwy{font-family:"Comic Sans MS", cursive, sans-serif !important;;border-color:inherit;text-align:center;vertical-align:top}
+.tg .tg-ojmm{font-weight:bold;font-family:"Comic Sans MS", cursive, sans-serif !important;;background-color:#32cb00;color:#000000;border-color:inherit;text-align:center;vertical-align:top}
+.tg .tg-qejj{font-weight:bold;font-family:"Comic Sans MS", cursive, sans-serif !important;;background-color:#cbcefb;color:#000000;border-color:inherit;text-align:center;vertical-align:top}
+.tg .tg-2se1{font-family:"Comic Sans MS", cursive, sans-serif !important;;background-color:#ffc702;border-color:inherit;text-align:center;vertical-align:top}
+
+
+
+
+
+
+    </style>
+
+    <!--Jquery-->
+    <script src="https://code.jquery.com/jquery-3.3.1.js"
+            integrity="sha256-2Kok7MbOyxpgUVvAk/HJ2jigOSYS2auK4Pfzbm7uH60="
+            crossorigin="anonymous"></script>
+
+    <!--Vue.js-->
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.5.17/dist/vue.js"></script>
+
+</head>
+
+<body>
+<div>
+    <div id="gamestats">
+        <h2>Welcome <code>{{ response.currentPlayer.name }}!</code></h2>
+        <h3>Game {{ response.currentGame.name }} statistics!</h3>
+        <table class="tg">
+            <tr>
+                <th class="tg-ojmm">Team</th>
+                <th class="tg-qejj">{{response.currentGame.teamA.name}}</th>
+                <th class="tg-qejj">{{response.currentGame.teamB.name}}</th>
+            </tr>
+            <tr>
+                <td class="tg-2se1">Points</td>
+                <td class="tg-biwy">{{response.currentGame.teamA.points}}</td>
+                <td class="tg-biwy">{{response.currentGame.teamB.points}}</td>
+            </tr>
+        </table>
+
+        <br>
+        <hr>
+        <br>
+
+
+        <table class="tg">
+            <tr>
+                <th class="tg-qejj">Player Name</th>
+                <th class="tg-qejj">Points</th>
+                <th class="tg-qejj">Team</th>
+                <th class="tg-qejj">Charading Count</th>
+                <th class="tg-qejj">Words Entered</th>
+            </tr>
+            <tr v-for="player in response.currentGame.allPlayers">
+                <td class="tg-biwy">{{player.name}}</td>
+                <td class="tg-biwy">{{player.points}}</td>
+                <td class="tg-biwy">{{player.teamName}}</td>
+                <td class="tg-biwy">{{player.playingsCount}}</td>
+                <td class="tg-biwy">{{player.wordsCount}} out of {{response.currentGame.wordCountLimit}}</td>
+            </tr>
+        </table>
+        <br>
+        <hr>
+        <br>
+
+        <div v-if="response.currentGame.gameStatus=='STARTED'">
+            <p><label>Add a word : </label></p>
+            <p><input id="word" type="text"></p>
+            <button onclick="submitWord()">Add</button>
+            <br>
+            <hr>
+            <br>
+        </div>
+
+
+        <h2>Game Status: <b>{{ response.currentGame.status }}</b></h2>
+
+        <div v-if="response.currentGame.charader">
+            <div v-if="response.currentGame.charader.username==response.currentPlayer.username">
+                <h4>Charader is {{ response.currentGame.charader.name }}!</h4>
+                <br> <br>
+                <h2 v-if="response.currentGame.charadingStarted">{{ response.currentWord.text }}</h2>
+                <div v-else>
+                    <button onclick="startCharade()">Start !</button>
+                </div>
+                <br>
+                <button v-if="response.currentGame.charadingStarted" style="width: 350px;font-size:200%;">Skip this word!</button>
+                <br>
+                <br>
+                <button v-if="response.currentGame.charadingStarted">OKAY !</button>
+
+                <br> <br>
+                <h2 v-if="response.currentGame.charader"><b>{{response.currentGame.timeSecondsRemaining}}</b>
+                    seconds remaining!</h2>
+            </div>
+            <div v-else>
+                <h4 v-if="response.currentGame.charader">Charader is {{ response.currentGame.charader.name }}!</h4>
+                <h2 v-if="response.currentGame.charader"><b>{{response.currentGame.timeSecondsRemaining}}</b>
+                    seconds remaining!</h2>
+            </div>
+
+        </div>
+        <!--For other players show time-->
+
+
+
+    </div>
+
+
+    <br>
+    <hr>
+    <br>
+    <form action="/signout">
+        <button>Sign out</button>
+    </form>
+
+</div>
+
+<script>
+
+
+    var gameStats = new Vue({
+        el: '#gamestats',
+        data: {
+                response: {
+                    message: "",
+                    currentGame: {
+                    },
+                    games: [],
+                    currentPlayer: {
+                    },
+                    currentWord: {}
+                }
+        }
+    });
+    console.log('loaded!');
+
+
+    $.ajax({
+        type: "GET",
+        url: "/user",
+        crossDomain: true
+    }).done(
+        function (data) {
+                var ws = new WebSocket('ws://'+window.location.hostname +  ':9090/ws/'+ data.currentPlayer.username);
+                ws.onopen = function () {
+                    console.log('Connected to backend!');
+                };
+                ws.onclose = function () {
+                    console.log('Disconnected from backend!');
+                };
+
+                ws.onmessage = function (event) {
+                   console.log(event.data);
+                   gameStats.response = JSON.parse(event.data);
+                };
+
+         }
+    ).fail(function (xhr, textStatus, errorThrown) {
+        console.log(xhr);
+    });
+
+
+
+
+
+
+
+
+function joinGame(a, b){
+    console.log(a + '   ' +  b);
+}
+
+
+function submitWord(){
+       $.ajax({
+        type: "GET",
+        url: "/word/" + $( "#word" ).val(),
+        crossDomain: true
+    }).done(
+        function (data) {
+            console.log(data);
+            alert(data.message);
+         }
+    ).fail(function (xhr, textStatus, errorThrown) {
+        console.log(xhr);
+    });
+
+}
+
+function startCharade(){
+      $.ajax({
+        type: "GET",
+        url: "/startCharade",
+        crossDomain: true
+    }).done(
+        function (data) {
+            console.log(data);
+         }
+    ).fail(function (xhr, textStatus, errorThrown) {
+        console.log(xhr);
+    });
+
+}
+
+
+
+</script>
+</body>
+
+</html>
