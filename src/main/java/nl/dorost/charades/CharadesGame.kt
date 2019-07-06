@@ -76,7 +76,7 @@ class CharadesGame(
             }
             CharadingStatus.VOTING -> {
                 log.info { "Voting..." }
-                if (this.charadedWords.isEmpty()){
+                if (this.charadedWords.isEmpty() && !playersToPlay.isEmpty()){
                     changeTurn()
                     pickCharader()
                 }
