@@ -1,189 +1,292 @@
 package nl.dorost.charades
 
 import mu.KotlinLogging
+import nl.dorost.charades.domain.*
 import java.util.*
 import kotlin.concurrent.scheduleAtFixedRate
 
-class CharadesGame(val game: Game) {
+class CharadesGame(
+        val repository: Repository
+) {
 
     val log = KotlinLogging.logger {}
+    lateinit var game: Game
+    private var scheduler: TimerTask? = null
+    private var timeRemainingSeconds: Int = 0
+    private var wordsToGuessStack: MutableList<Word> = mutableListOf()
+    private var playersToPlay: MutableList<Player> = mutableListOf()
+    private var charadedWords: MutableList<Word> = mutableListOf()
+    private var startCommandReceived: Boolean = false
+    private var charader: Player? = null
+    private var charadingStarted: Boolean = false
+    fun getCharader() = this.charader
 
-    var scheduler: TimerTask? = null
-    fun nextStep() {
-        log.info { "Entered ${game.status} state! CharadeDone: ${game.charadeDone}" }
+
+    init {
+        Timer().scheduleAtFixedRate(0, 200) {
+            if (this@CharadesGame::game.isInitialized)
+                changeBasedOnGameStage()
+        }
+    }
+
+    fun createGame(game: Game) {
+        this.game = game
+    }
+
+    fun getGameFromId(gameId: UInt) {
+        this.game = this.repository.loadGame(gameId) ?: throw RuntimeException("GameId $gameId not found!")
+    }
+
+    fun getGameFromUserName(userName: String) {
+        this.game = repository.readGameForUser(userName) ?: throw RuntimeException("Game not found for user $userName!")
+    }
+
+    fun changeBasedOnGameStage() {
         when (game.status) {
             GameStatus.STARTED -> {
                 log.info { "Game started waiting for players to get ready!" }
-                if (allPlayersReady() && game.teamA.players.size == game.teamB.players.size) {
-                    log.info { "Players are ready now! Starting stage one!" }
+                if (checkIfReadyToStart()) {
                     game.status = GameStatus.SENTENCE
-                    fillPlayersToPlay()
-                    makeWordsPot()
-                    pickCharader()
                 }
             }
-            GameStatus.SENTENCE -> {
-                if (game.playersToPlay.isEmpty()) {
-                    game.status = GameStatus.ONE_WORD
-                    fillPlayersToPlay()
-                    makeWordsPot()
-                    pickCharader()
-                } else if (game.charadeDone) {
-                    log.info { "Changing turns!" }
-                    changeTurn()
-                    pickCharader()
-                }
-            }
-            GameStatus.ONE_WORD -> {
-                if (game.playersToPlay.isEmpty()) {
-                    game.status = GameStatus.PANTHOMIME
-                    fillPlayersToPlay()
-                    makeWordsPot()
-                    pickCharader()
-
-                } else if (game.charadeDone) {
-                    log.info { "Changing turns!" }
-                    changeTurn()
-                    pickCharader()
-                }
-            }
-            GameStatus.PANTHOMIME -> {
-                if (game.playersToPlay.isEmpty()) {
-                    game.status = GameStatus.FINISHED
-                    game.charader = null
-                } else if (game.charadeDone) {
-                    log.info { "Changing turns!" }
-                    changeTurn()
-                    pickCharader()
-                }
-            }
+            GameStatus.SENTENCE -> handleCharading()
+            GameStatus.ONE_WORD -> handleCharading()
+            GameStatus.PANTHOMIME -> handleCharading()
             GameStatus.FINISHED -> {
+                game.charadingStatus = CharadingStatus.NOT_STARTED
+                charader = null
 
+            }
+        }
+
+    }
+
+    private fun handleCharading() {
+        when (game.charadingStatus) {
+            CharadingStatus.NOT_STARTED -> {
+                game.charadingStatus = CharadingStatus.STARTED
+                makeGameReadyForCharading()
+            }
+            CharadingStatus.STARTED -> {
+                log.info { "Charading..." }
+                if (this.playersToPlay.isEmpty() && this.timeRemainingSeconds==0) {
+                    game.charadingStatus = CharadingStatus.FINISHED
+                    log.info { "Everyone charaded!" }
+                }
+            }
+            CharadingStatus.VOTING -> {
+                log.info { "Voting..." }
+                if (this.charadedWords.isEmpty()){
+                    changeTurn()
+                    pickCharader()
+                }
+                if (everyoneVoted()) {
+
+                    // apply points changes
+
+                    this.charadedWords.forEach { word ->
+                        if (word.positiveVote>word.negativeVote){
+                            log.info { "Accepted word ${word.text}" }
+                            // do nothing
+                        }else{
+                            log.info { "Rejected word ${word.text}" }
+                            // revert
+                            this.game.teams.first { it.name == getTeamName(this.charader!!.username) }.players.first { it.username==this.charader!!.username }.points--
+                        }
+
+                    }
+                    this.charader = null
+                    this.charadedWords.clear()
+
+                    if (this.playersToPlay.isEmpty()){
+                        game.charadingStatus = CharadingStatus.FINISHED
+                        log.info { "Everyone charaded!" }
+                        return
+                    }
+                    this.game.charadingStatus = CharadingStatus.STARTED
+                    changeTurn()
+                    pickCharader()
+                }
+
+            }
+            CharadingStatus.FINISHED -> {
+                log.info { "This stage is finished!" }
+                goToNextStage()
             }
         }
     }
 
-    private fun fillPlayersToPlay() {
-        game.playersToPlay = (game.teamA.players + game.teamB.players).toMutableList()
-        log.info { "Players refilled, count: ${game.playersToPlay.size}" }
+    private fun goToNextStage() {
+        log.info { "Chaning the game stage from ${game.status.toString()}" }
+        resetVotes()
+        when (game.status) {
+            GameStatus.STARTED -> this.game.status = GameStatus.SENTENCE
+            GameStatus.SENTENCE -> this.game.status = GameStatus.ONE_WORD
+            GameStatus.ONE_WORD -> this.game.status = GameStatus.PANTHOMIME
+            GameStatus.PANTHOMIME -> this.game.status = GameStatus.FINISHED
+            GameStatus.FINISHED -> {
+            }
+        }
+        this.game.charadingStatus = CharadingStatus.NOT_STARTED
+        log.info { "New status ${game.status}" }
+
+    }
+
+    private fun makeGameReadyForCharading() {
+        fillPlayersToPlay()
+        makeWordsPot()
+        changeTurn()
+        pickCharader()
+    }
+
+    private fun checkIfReadyToStart() = allPlayersReady()
+
+    fun fillPlayersToPlay() {
+        this.playersToPlay = game.teams.flatMap { it.players }.toMutableList()
     }
 
     fun changeTurn() {
-        if (game.turn == null)
-            game.turn = if (Math.random() < 0.5) game.teamA else game.teamB
+        if (game.teamIdTurn == null)
+            game.teamIdTurn = game.teams.map { it.id }.shuffled().first()
         else
-            game.turn = if (game.turn == game.teamA) game.teamB else game.teamA
-        log.info { "Turn changed to ${game.turn?.name}" }
+            game.teamIdTurn = game.teams.filter { it.id != game.teamIdTurn }.minBy { it.players.map { it.playingsCount }.sum() }!!.id
+        log.info { "Turn changed to ${game.teamIdTurn}" }
     }
 
-    fun allPlayersReady(): Boolean {
-        return (game.teamA.players + game.teamB.players)
-                .all { it.words.size >= game.wordsCountLimit }
-    }
+    fun allPlayersReady() = game.teams.flatMap { it.players }
+            .all { it.words.size == game.wordsCountLimit } && game.teams.map { it.players.size }.toSet().size == 1
 
     fun pickCharader() {
-        if (game.turn!!.name == game.teamA.name && game.playersToPlay.any { game.teamA.players.contains(it) }) {
-            game.charader = game.playersToPlay.filter { game.teamA.players.contains(it) }.shuffled().first()
-        } else {
-            game.charader = game.playersToPlay.filter { game.teamB.players.contains(it) }.shuffled().first()
+        resetVotes()
+
+        this.charader = playersToPlay.filter { user ->
+            game.teams.first { it.id == this.game.teamIdTurn }.players.map { it.username }.contains(user.username)
+        }.shuffled().first().apply {
+            this.isCharader = true
+            this.playingsCount++
         }
-        if(game.playersToPlay.remove(game.charader!!))
-            log.info { "Removed charader from remaining list!" }
-        else
-            log.info { "Ooops!" }
-        game.timeRemainingSeconds = game.timeLimitSeconds
+
+        this.playersToPlay.removeIf { it.id == this.charader!!.id }
+        this.timeRemainingSeconds = game.timeLimitSeconds
+    }
+
+    private fun resetVotes() {
+        game.teams.flatMap { it.players }.forEach {
+            it.votes.clear()
+        }
     }
 
     fun makeWordsPot() {
-        game.wordsToGuessStack.clear()
-        game.wordsToGuessStack.addAll(
-                (game.teamA.players.flatMap { it.words } +
-                        game.teamB.players.flatMap { it.words }
-                        ).shuffled()
-        )
+        this.wordsToGuessStack.clear()
+        this.wordsToGuessStack.addAll(game.teams.flatMap { it.players }.flatMap { it.words }.shuffled())
     }
 
     fun addWord(userName: String, word: Word): Boolean {
-        val user = getPlayerByUserName(userName)
-        if (user.words.map { it.text }.contains(word.text) || user.words.size == game.wordsCountLimit)
-            return false
-        user.words.add(word)
-        return true
+        val player = game.teams.flatMap { it.players }.first { it.username == userName }
+        return if (player.words.size == game.wordsCountLimit)
+            false
+        else {
+            player.words.add(word)
+            true
+        }
     }
 
-    fun playerJoin(player: Player, teamName: String): Boolean {
+    fun playerJoinToGame(username: String, gameId: UInt, teamId: UInt): Boolean {
+        this.game = repository.loadGame(gameId)!!
         if (game.status != GameStatus.STARTED)
             return false
-        if (game.teamA.name == teamName) {
-            if (game.teamA.players.none { it.username == player.username })
-                game.teamA.players.add(player)
-        } else {
-            if (game.teamB.players.none { it.username == player.username })
-                game.teamB.players.add(player)
-        }
+        if (game.teams.flatMap { it.players }.map { it.username }.contains(username))
+            return false
+        game.teams.first { it.id == teamId }.players.add(repository.readUser(username)!!)
+
         return true
 
     }
 
     fun charadesWord() {
-        val word = game.wordsToGuessStack.last()
-        game.charader!!.charadesWords.add(word)
-        game.wordsToGuessStack.remove(word)
-        game.charader!!.points++
-        if (game.teamA.players.map { it.username }.contains(game.charader!!.username)) {
-            game.teamA.points++
-        } else {
-            game.teamB.points++
-        }
+        val word = this.wordsToGuessStack.last()
+        this.charader!!.charadesWords.add(word.copy(positiveVote = 0, negativeVote = 0))
+        this.wordsToGuessStack.remove(word)
+
+        //update points
+        this.charader!!.points++
+        this.game.teams.first{ it.name==getTeamName(this.charader!!.username) }.points++
+
+        if (this.wordsToGuessStack.size == 0)
+            makeWordsPot()
 
     }
 
-    fun charadingStarted(userName: String): Boolean {
-        if (game.charader!!.username != userName)
-            return false
-        log.info { "Charading started for $userName" }
-        if (game.getTeamForUser(userName).name == game.teamA.name)
-            game.teamA.players.first { it.username == userName }.playingsCount++
-        else
-            game.teamB.players.first { it.username == userName }.playingsCount++
 
-
-        game.charadingStarted = true
-        game.timeRemainingSeconds = game.timeLimitSeconds
-
+    fun charadingStarted(userName: String) {
+        if (userName != this.charader!!.username)
+            return
+        log.info { "Started the timer..." }
+        charadingStarted = true
         scheduler = Timer().scheduleAtFixedRate(0, 1000) {
-            game.timeRemainingSeconds--
-            if (game.timeRemainingSeconds == 0) {
+            this@CharadesGame.timeRemainingSeconds--
+            if (this@CharadesGame.timeRemainingSeconds == 0) {
                 this.cancel()
-                game.charadeDone = true
-                game.charadingStarted = false
-                nextStep()
+                this@CharadesGame.charadedWords = this@CharadesGame.charader!!.charadesWords
+                this@CharadesGame.game.charadingStatus = CharadingStatus.VOTING
+                charadingStarted = false
+                changeBasedOnGameStage()
             }
         }
-        return true
     }
 
     fun skipWord() {
-        val word = game.wordsToGuessStack.last()
-        game.wordsToGuessStack = (mutableListOf(word)
-                + game.wordsToGuessStack.filter { it != word }).toMutableList()
+        val word = this.wordsToGuessStack.last()
+        this.wordsToGuessStack = (mutableListOf(word)
+                + this.wordsToGuessStack.filter { it != word }).toMutableList()
     }
 
-    private fun getPlayerByUserName(userName: String) = (game.teamA.players
-            + game.teamB.players)
-            .firstOrNull { it.username == userName }
-            ?: throw RuntimeException("User $userName not found!")
+    fun vote(userName: String, word: String, vote: Vote) {
+        val player = game.teams.flatMap { it.players }.first { it.username == userName }
+        if ( this.charadedWords.isEmpty() || player.votes.size==this.charadedWords.size) {
+            return
+        }
 
+
+        if (player.votes.contains(word))
+            return
+        if (vote == Vote.ACCEPTED) {
+            this.charadedWords.first { it.text == word }.positiveVote++
+        } else
+            this.charadedWords.first { it.text == word }.negativeVote++
+
+        player.votes.add(word)
+    }
+
+    private fun everyoneVoted(): Boolean = this.charadedWords.map { it.positiveVote + it.negativeVote }.all { it==this.game.teams.flatMap { it.players }.count() }
+
+    fun createUpdate(userName: String) = ResponseModel(
+            gameName = this.game.name,
+            gameStatus = this.game.status.toString(),
+            charadingStatus = this.game.charadingStatus.toString(),
+            currentPlayer = this.repository.readUser(userName)?.toPlayerResponse(getTeamName(userName)),
+            currentWord = if (this.charader?.username == userName) this.wordsToGuessStack.lastOrNull() else null,
+            charadedWords = this.charadedWords,
+            players = this.game.teams.flatMap { it.players }.map { user ->
+                user.toPlayerResponse(getTeamName(user.username))
+            },
+            teams = this.game.teams.map { TeamResponse(id = it.id, teamName = it.name, points = it.players.map { it.points }.sum()) },
+            charader = this.charader?.let { it.toPlayerResponse(getTeamName(userName)) },
+            timeSecondsRemaining = this.timeRemainingSeconds,
+            wordsCountLimit = this.game.wordsCountLimit,
+            status = this.game.status.s,
+            charadingStarted = charadingStarted,
+            winnerTeam = this.game.teams.maxBy { it.points }?.name
+
+
+    )
+
+    private fun getTeamName(userName: String) =
+            this.game.teams.first { it.players.map { it.username }.contains(userName) }.name
+
+    fun save() {
+        repository.saveGame(this.game)
+    }
 
 }
 
-fun main() {
-    var x = 0
-    val schedule = Timer().scheduleAtFixedRate(0, 1000) {
-        x++
-        println("Hey")
-        if (x > 5)
-            this.cancel()
-    }
-    println("DONE")
-}

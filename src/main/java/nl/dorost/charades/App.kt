@@ -27,7 +27,6 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.websocket.WebSockets
 import io.ktor.websocket.webSocket
-import kotlinx.coroutines.channels.Channel
 import kotlinx.html.*
 import org.apache.commons.io.IOUtils
 import java.nio.charset.StandardCharsets
@@ -38,13 +37,17 @@ import io.ktor.http.content.static
 import io.ktor.sessions.Sessions
 import io.ktor.sessions.cookie
 import kotlinx.coroutines.delay
+import nl.dorost.charades.domain.*
 import java.io.StringWriter
+import kotlin.random.Random
+import kotlin.random.nextUInt
 
 
 fun main(args: Array<String>) {
 
     val objectMapper = ObjectMapper().registerKotlinModule().setSerializationInclusion(JsonInclude.Include.NON_NULL)
-    val storage = MemoryStorage()
+    val repository = MemoryStorage()
+    val charadesGame = CharadesGame(repository = repository)
     val engine = PebbleEngine.Builder().build()
     val joinGameTemplate = engine.getTemplate("static/join.html")
 
@@ -72,10 +75,10 @@ fun main(args: Array<String>) {
                 basic {
                     realm = "ktor"
                     validate { credentials ->
-                        val user = storage.readUser(credentials.name)
+                        val user = repository.readUser(credentials.name)
 
-                        return@validate user?.let { player ->
-                            return@let if (player.password == hash(credentials.password)) UserIdPrincipal(credentials.name)
+                        return@validate user.let { player ->
+                            return@let if (player!!.password == hash(credentials.password)) UserIdPrincipal(credentials.name)
                             else null
                         }
                     }
@@ -93,7 +96,8 @@ fun main(args: Array<String>) {
 
                     while (true) {
                         username?.let {
-                            val response = storage.readUpdateForUser(username)
+                            charadesGame.getGameFromUserName(username)
+                            val response = charadesGame.createUpdate(username)
                             val toSend = objectMapper.writeValueAsString(response)
                             outgoing.send(Frame.Text(toSend))
                             delay(1000)
@@ -103,24 +107,61 @@ fun main(args: Array<String>) {
 
                 authenticate {
 
+                    get("/acceptWord/{word}") {
+                        val username = call.principal<UserIdPrincipal>()?.name
+                        charadesGame.getGameFromUserName(username!!)
+                        val wordText = call.parameters["word"]!!
+                        charadesGame.vote(username, wordText, Vote.ACCEPTED)
+                        charadesGame.save()
+
+                        call.respond(ResponseModel(message = "Word accepted!"))
+                    }
+
+                    get("/rejectWord/{word}") {
+                        val username = call.principal<UserIdPrincipal>()?.name
+                        charadesGame.getGameFromUserName(username!!)
+                        val wordText = call.parameters["word"]!!
+                        charadesGame.vote(username, wordText, Vote.REJECTED)
+                        call.respond(ResponseModel(message = "Word rejected!"))
+                    }
+
+
+                    get("/skipWord") {
+                        val username = call.principal<UserIdPrincipal>()?.name!!
+                        charadesGame.getGameFromUserName(username!!)
+                        charadesGame.skipWord()
+                        charadesGame.save()
+
+                        call.respond(ResponseModel(message = "Skipped the word!"))
+                    }
+
+                    get("/wordCharaded") {
+                        val username = call.principal<UserIdPrincipal>()?.name
+                        charadesGame.getGameFromUserName(username!!)
+
+                        charadesGame.charadesWord()
+                        charadesGame.save()
+
+                        call.respond(ResponseModel(message = "Charaded the word!"))
+                    }
+
                     get("/startCharade") {
                         val username = call.principal<UserIdPrincipal>()?.name
-                        val game = storage.readGameForUser(username!!)
-                        val chGame = CharadesGame(game!!)
-                        if (chGame.charadingStarted(username))
-                            call.respond(ResponseModel(message = "Started charading!"))
-                        else
-                            call.respond(ResponseModel(message = "Failed to start to charade!"))
+                        charadesGame.getGameFromUserName(username!!)
+
+                        charadesGame.charadingStarted(username)
+                        charadesGame.save()
+                        call.respond(ResponseModel(message = "Started charading!"))
                     }
 
                     get("/word/{word}") {
                         val word = call.parameters["word"]
                         val username = call.principal<UserIdPrincipal>()!!.name
-                        val game = storage.readGameForUser(username!!)
-                        val chGame = CharadesGame(game!!)
-                        if (chGame.addWord(username, Word(text = word!!))) {
+                        charadesGame.getGameFromUserName(username)
+                        if (charadesGame.addWord(username, Word(text = word!!))) {
+                            charadesGame.changeBasedOnGameStage()
+                            charadesGame.save()
                             call.respond(ResponseModel(message = "OK!"))
-                            chGame.nextStep()
                         } else {
                             call.respond(ResponseModel(message = "Not possible anymore!"))
                             return@get
@@ -136,35 +177,23 @@ fun main(args: Array<String>) {
                     }
 
                     get("/users") {
-                        call.respond(storage.readAllUsers().map { it.password = null })
+                        call.respond(repository.readAllUsers().map { it.password = null })
                     }
                     get("/user/") {
                         val user = call.principal<UserIdPrincipal>()!!.name
-                        val responseModel = ResponseModel(currentPlayer = storage.readUser(user)!!.toUserRespone())
+                        val responseModel = ResponseModel(currentPlayer = repository.readUser(user)?.toPlayerResponse())
                         call.respond(responseModel)
                     }
 
                     get("/game/{gameId}/{teamId}") {
                         log.info("Params : ${call.parameters["gameId"]} and ${call.parameters["teamID"]}")
                         val gameId: UInt? = (call.parameters["gameId"] as? String)?.toUInt()
-                        val teamId: ULong? = (call.parameters["teamId"] as? String)?.toULong()
-                        if (gameId == null || teamId == null) {
-                            call.respondText("GameId or TeamId should be specified!")
-                            return@get
-                        }
-                        val game = storage.loadGame(gameId = gameId!!)
-                        if (game == null) {
-                            call.respondText("Couldn't find the game with id $gameId!")
-                            return@get
-                        }
+                        val teamId: UInt? = (call.parameters["teamId"] as? String)?.toUInt()
 
-                        val player = storage.readUser(call.principal<UserIdPrincipal>()!!.name)
-                        val team = if ((game as Game).teamA.id == teamId) game.teamA else game.teamB
+                        val username = call.principal<UserIdPrincipal>()?.name!!
+                        charadesGame.playerJoinToGame(username, gameId!!, teamId!!)
 
-                        val charades = CharadesGame(game)
-                        if (charades.playerJoin(player!!, team.name))
-                            storage.saveGame(charades.game)
-
+                        charadesGame.save()
                         call.respondText(
                                 IOUtils.toString(getFile("static/game.html"), "utf-8"),
                                 ContentType.Text.Html
@@ -172,13 +201,13 @@ fun main(args: Array<String>) {
                     }
 
                     get("/joinOrCreateGame") {
-
-
                         // Here list all games and names of teams for the user
                         // or create a game
                         val writer = StringWriter()
+                        val data = createGamesList(repository)
+                        log.info("$data")
                         joinGameTemplate.evaluate(
-                                writer, createGamesList(storage)
+                                writer, data
                         )
                         call.respondText(
                                 writer.toString(),
@@ -190,21 +219,29 @@ fun main(args: Array<String>) {
 
                     post("/create") {
                         val parameters = call.receiveParameters()
-                        val newGame = storage.saveGame(
-                                Game(
-                                        name = parameters["game-name"]!!,
-                                        teamA = Team(
+                        val game = Game(
+                                id = Random.nextUInt(),
+                                name = parameters["game-name"]!!,
+                                teams = mutableListOf(
+                                        Team(
+                                                id = Random.nextUInt(),
                                                 name = parameters["team-a-name"]!!
                                         ),
-                                        teamB = Team(
+                                        Team(
+                                                id = Random.nextUInt(),
                                                 name = parameters["team-b-name"]!!
                                         )
-                                )
+                                ),
+                                wordsCountLimit = parameters["words-count"]!!.toInt(),
+                                timeLimitSeconds = parameters["time-limit"]!!.toInt()
+                        )
+                        repository.saveGame(
+                                game
                         )
                         call.respondHtml {
                             body {
                                 p {
-                                    +"Game with id ${newGame.id} created Successfully!"
+                                    +"Game with id ${game.id} created Successfully!"
                                 }
                                 p {
                                     +"Please go to "
@@ -225,7 +262,7 @@ fun main(args: Array<String>) {
                             username = parameters["username-input"]!!,
                             password = hash(parameters["password-input"]!!)
                     )
-                    val playerId = storage.createUser(player)
+                    val playerId = repository.createUser(player)
                     playerId?.let {
 
                         call.respondHtml {
@@ -299,14 +336,20 @@ fun main(args: Array<String>) {
 }
 
 
-fun createGamesList(storage: Storage): Map<String, Any> =
+fun createGamesList(repository: Repository): Map<String, Any> =
         mapOf(
-                "games" to storage.readAllGames().map { game ->
+                "games" to repository.readAllGames().map { game ->
                     mapOf(
                             "name" to game.name,
                             "id" to game.id,
-                            "teamA" to mapOf("name" to game.teamA.name, "id" to game.teamA.id),
-                            "teamB" to mapOf("name" to game.teamB.name, "id" to game.teamB.id)
+                            "teams" to
+                                    game.teams.map {
+                                        mapOf(
+                                                "id" to it.id,
+                                                "name" to it.name
+                                        )
+                                    }
+
                     )
                 }
         )

@@ -14,6 +14,7 @@
 
 
 
+
     </style>
 
     <!--Jquery-->
@@ -30,17 +31,15 @@
 <div>
     <div id="gamestats">
         <h2>Welcome <code>{{ response.currentPlayer.name }}!</code></h2>
-        <h3>Game {{ response.currentGame.name }} statistics!</h3>
+        <h3>Game {{ response.gameName }} statistics!</h3>
         <table class="tg">
             <tr>
                 <th class="tg-ojmm">Team</th>
-                <th class="tg-qejj">{{response.currentGame.teamA.name}}</th>
-                <th class="tg-qejj">{{response.currentGame.teamB.name}}</th>
+                <th class="tg-qejj" v-for="team in response.teams">{{team.teamName}}</th>
             </tr>
             <tr>
                 <td class="tg-2se1">Points</td>
-                <td class="tg-biwy">{{response.currentGame.teamA.points}}</td>
-                <td class="tg-biwy">{{response.currentGame.teamB.points}}</td>
+                <td class="tg-biwy" v-for="team in response.teams">{{team.points}}</td>
             </tr>
         </table>
 
@@ -57,19 +56,19 @@
                 <th class="tg-qejj">Charading Count</th>
                 <th class="tg-qejj">Words Entered</th>
             </tr>
-            <tr v-for="player in response.currentGame.allPlayers">
+            <tr v-for="player in response.players">
                 <td class="tg-biwy">{{player.name}}</td>
                 <td class="tg-biwy">{{player.points}}</td>
                 <td class="tg-biwy">{{player.teamName}}</td>
                 <td class="tg-biwy">{{player.playingsCount}}</td>
-                <td class="tg-biwy">{{player.wordsCount}} out of {{response.currentGame.wordCountLimit}}</td>
+                <td class="tg-biwy">{{player.wordsCount}} out of {{response.wordsCountLimit}}</td>
             </tr>
         </table>
         <br>
         <hr>
         <br>
 
-        <div v-if="response.currentGame.gameStatus=='STARTED'">
+        <div v-if="response.gameStatus=='STARTED'">
             <p><label>Add a word : </label></p>
             <p><input id="word" type="text"></p>
             <button onclick="submitWord()">Add</button>
@@ -79,36 +78,62 @@
         </div>
 
 
-        <h2>Game Status: <b>{{ response.currentGame.status }}</b></h2>
+        <h2>Game Status: <b>{{ response.status }}</b></h2>
+        <h1 v-if="response.charadingStatus=='FINISHED'">The winner is {{ response.winnerTeam }}</h1>
 
-        <div v-if="response.currentGame.charader">
-            <div v-if="response.currentGame.charader.username==response.currentPlayer.username">
-                <h4>Charader is {{ response.currentGame.charader.name }}!</h4>
-                <br> <br>
-                <h2 v-if="response.currentGame.charadingStarted">{{ response.currentWord.text }}</h2>
-                <div v-else>
-                    <button onclick="startCharade()">Start !</button>
-                </div>
-                <br>
-                <button v-if="response.currentGame.charadingStarted" style="width: 350px;font-size:200%;">Skip this word!</button>
-                <br>
-                <br>
-                <button v-if="response.currentGame.charadingStarted">OKAY !</button>
+        <div v-if="response.charadingStatus=='STARTED'">
+            <div v-if="response.charader.username==response.currentPlayer.username">
+                <h4>Charader is {{ response.charader.name }}!</h4>
+                    <br> <br>
+                    <h2 v-if="response.charadingStarted">{{ response.currentWord.text }}</h2>
+                    <div>
+                        <button v-if="!response.charadingStarted" onclick="startCharade()">Start !</button>
+                    </div>
+                    <br>
+                    <button v-if="response.charadingStarted" onclick="skipWord()" style="width: 350px;font-size:200%;">Skip this word!</button>
+                    <br>
+                    <br>
+                    <button v-if="response.charadingStarted" onclick="wordCharaded()">OKAY !</button>
 
-                <br> <br>
-                <h2 v-if="response.currentGame.charader"><b>{{response.currentGame.timeSecondsRemaining}}</b>
-                    seconds remaining!</h2>
+                    <br> <br>
+                    <h2><b>{{response.timeSecondsRemaining}}</b>
+                        seconds remaining!</h2>
             </div>
             <div v-else>
-                <h4 v-if="response.currentGame.charader">Charader is {{ response.currentGame.charader.name }}!</h4>
-                <h2 v-if="response.currentGame.charader"><b>{{response.currentGame.timeSecondsRemaining}}</b>
+                <h4 v-if="response.charader">Charader is {{ response.charader.name }}!</h4>
+                <h2 v-if="response.charader"><b>{{response.timeSecondsRemaining}}</b>
                     seconds remaining!</h2>
             </div>
 
         </div>
-        <!--For other players show time-->
 
 
+        <br>
+        <hr>
+        <br>
+
+        <div v-if="response.charadingStatus=='VOTING'">
+            <table class="tg">
+                <tr>
+                    <th class="tg-qejj">Current Charaded Word</th>
+                    <th class="tg-qejj">Positive Votes</th>
+                    <th class="tg-qejj">Negative Votes</th>
+                    <th class="tg-qejj">Accept</th>
+                    <th class="tg-qejj">Reject</th>
+                </tr>
+                <tr v-for="word in response.charadedWords">
+                    <td class="tg-biwy">{{word.text}}</td>
+                    <td class="tg-biwy">{{word.positiveVote}}</td>
+                    <td class="tg-biwy">{{word.negativeVote}}</td>
+                    <td class="tg-biwy">
+                        <button v-bind:id="word.text" onclick="acceptWord(this.id)">Accept</button>
+                    </td>
+                    <td class="tg-biwy">
+                        <button v-bind:id="word.text" onclick="rejectWord(this.id)">Reject</button>
+                    </td>
+                </tr>
+            </table>
+        </div>
 
     </div>
 
@@ -130,12 +155,12 @@
         data: {
                 response: {
                     message: "",
-                    currentGame: {
-                    },
-                    games: [],
-                    currentPlayer: {
-                    },
-                    currentWord: {}
+                    gameName: "",
+                    currentPlayer: null,
+                    currentWord: null,
+                    teams: [],
+                    players: []
+
                 }
         }
     });
@@ -157,7 +182,7 @@
                 };
 
                 ws.onmessage = function (event) {
-                   console.log(event.data);
+                    console.log(event.data);
                    gameStats.response = JSON.parse(event.data);
                 };
 
@@ -207,6 +232,70 @@ function startCharade(){
         console.log(xhr);
     });
 
+}
+
+
+function skipWord(){
+      $.ajax({
+        type: "GET",
+        url: "/skipWord",
+        crossDomain: true
+    }).done(
+        function (data) {
+            console.log(data);
+         }
+    ).fail(function (xhr, textStatus, errorThrown) {
+        console.log(xhr);
+    });
+
+}
+
+
+function wordCharaded(){
+      $.ajax({
+        type: "GET",
+        url: "/wordCharaded",
+        crossDomain: true
+    }).done(
+        function (data) {
+            console.log(data);
+         }
+    ).fail(function (xhr, textStatus, errorThrown) {
+        console.log(xhr);
+    });
+
+}
+
+
+function acceptWord(word){
+
+      $.ajax({
+        type: "GET",
+        url: "/acceptWord/" + word,
+        crossDomain: true
+    }).done(
+        function (data) {
+            console.log(data);
+         }
+    ).fail(function (xhr, textStatus, errorThrown) {
+        console.log(xhr);
+    });
+}
+
+
+function rejectWord(word){
+
+      $.ajax({
+        type: "GET",
+        url: "/rejectWord/" + word,
+        crossDomain: true
+    }).done(
+        function (data) {
+            console.log(data);
+         }
+    ).fail(function (xhr, textStatus, errorThrown) {
+        console.log(xhr);
+    });
 }
 
 

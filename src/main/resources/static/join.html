@@ -30,17 +30,16 @@
             {% for game in games %}
             <tr>
                 <td class="tg-2se1">{{ game.name }}</td>
+
+                {% for team in game.teams %}
                 <td class="tg-biwy">
-                    <form action="/game/{{ game.id }}/{{ game.teamA.id }}">
-                        <button type="submit">{{game.teamA.name}}</button>
+                    <form action="/game/{{ game.id }}/{{ team.id }}">
+                        <button type="submit">{{team.name}}</button>
                     </form>
 
                 </td>
-                <td class="tg-biwy">
-                    <form action="/game/{{ game.id }}/{{ game.teamB.id }}">
-                        <button type="submit">{{game.teamB.name}}</button>
-                    </form>
-                </td>
+                {% endfor %}
+
             </tr>
 
             {% endfor %}
